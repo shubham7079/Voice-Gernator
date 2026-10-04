@@ -214,7 +214,7 @@ export const QuotaDashboard: React.FC<QuotaDashboardProps> = ({
             <ul className={`text-xs space-y-1.5 pt-1 ${isDark ? 'text-neutral-400' : 'text-slate-600'}`}>
               <li>• Unlimited custom voice clones</li>
               <li>• Full REST API programmatic access</li>
-              <li>• High-resolution 24kHz WAV export</li>
+              <li>• High-quality 128kbps MP3 audio export & download</li>
               <li>• 10,000 characters renewed every 24h</li>
             </ul>
           </div>

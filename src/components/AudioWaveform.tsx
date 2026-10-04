@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, Download, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { useTheme } from '../ThemeContext';
+import { downloadAudioAsMp3 } from '../utils/audioMp3';
 
 interface AudioWaveformProps {
   audioBase64: string;
@@ -25,10 +26,14 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
-  // Construct audio data URL
+  // Construct audio data URL safely
   const audioSrc = audioBase64.startsWith('data:')
     ? audioBase64
-    : `data:audio/wav;base64,${audioBase64}`;
+    : audioBase64.startsWith('http://') || audioBase64.startsWith('https://') || audioBase64.startsWith('blob:')
+    ? audioBase64
+    : audioBase64.startsWith('UklGR')
+    ? `data:audio/wav;base64,${audioBase64}`
+    : `data:audio/mpeg;base64,${audioBase64}`;
 
   useEffect(() => {
     if (audioRef.current) {
@@ -52,7 +57,9 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     if (isPlaying) {
       audioRef.current.pause();
     } else {
-      audioRef.current.play().catch(console.error);
+      audioRef.current.play().catch((err) => {
+        console.warn('Audio playback notice:', err?.message || err);
+      });
     }
   };
 
@@ -76,13 +83,10 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     }
   };
 
+  // Downloads in MP3 format only
   const handleDownload = () => {
-    const a = document.createElement('a');
-    a.href = audioSrc;
-    a.download = `${title?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'voxclone_audio'}_${Date.now()}.wav`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const rawFilename = `${title?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'voxclone_audio'}_${Date.now()}.mp3`;
+    downloadAudioAsMp3(audioSrc, rawFilename);
   };
 
   const formatTime = (secs: number) => {
@@ -115,6 +119,9 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
           setIsPlaying(false);
           setCurrentTime(0);
         }}
+        onError={(e) => {
+          console.warn('Audio element source status:', e.currentTarget.error?.code || 'empty source');
+        }}
       />
 
       {(title || subtitle) && (
@@ -138,7 +145,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
                 : 'text-cyan-700 bg-cyan-50 border-cyan-200'
             }`}
           >
-            24kHz PCM WAV
+            MP3 Audio
           </span>
         </div>
       )}
@@ -282,10 +289,10 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
                 ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
             }`}
-            title="Download Audio (.wav)"
+            title="Download Audio (.mp3)"
           >
             <Download className="w-3.5 h-3.5 text-cyan-500" />
-            <span>Download</span>
+            <span>Download MP3</span>
           </button>
         </div>
       </div>

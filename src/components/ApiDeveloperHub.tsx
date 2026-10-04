@@ -107,12 +107,12 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
       setCustomRequestBody(
         JSON.stringify(
           {
-            text: 'Hello from VoxClone REST API. Synthesize speech programmatically with ease!',
+            text: 'Hello from VoxClone REST API. Synthesize speech programmatically in MP3 format!',
             voiceId: firstVoice,
             style: 'Conversational & Engaging',
             speed: 1.0,
             pitch: 0,
-            format: 'base64',
+            format: 'mp3',
           },
           null,
           2
@@ -148,6 +148,7 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${activeKey}`,
       };
+      headers['Accept'] = headers['Accept'] || 'application/json';
       if (isPost) {
         headers['Content-Type'] = 'application/json';
       }
@@ -159,7 +160,22 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
       });
 
       const endTime = performance.now();
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      let data: any;
+
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else if (contentType.includes('audio/')) {
+        data = {
+          success: true,
+          contentType,
+          message: 'Received binary MP3/WAV audio stream',
+          contentLength: res.headers.get('content-length') || 'streamed',
+        };
+      } else {
+        const textResp = await res.text();
+        data = { response: textResp };
+      }
 
       setTestResponse({
         status: res.status,
@@ -186,92 +202,139 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
     const voiceId = voices[0]?.id || 'voice_kore';
 
     if (codeLang === 'curl') {
-      return `# Text to Speech Synthesis Request (with pitch shift & speed)
+      return `# Text to Speech Synthesis Request (MP3 format, pitch shift & speed)
 curl -X POST "${baseUrl}/api/v1/tts" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
+  -H "Accept: audio/mpeg" \\
   -d '{
     "text": "Convert any script into speech with your cloned voice.",
     "voiceId": "${voiceId}",
     "speed": 1.0,
     "pitch": 0,
-    "style": "Conversational"
-  }'
-
-# Or stream raw audio/wav directly:
-# curl -X POST "${baseUrl}/api/v1/tts" \\
-#   -H "Authorization: Bearer ${key}" \\
-#   -H "Accept: audio/wav" \\
-#   -d '{"text": "Direct audio stream.", "voiceId": "${voiceId}", "pitch": 2}' \\
-#   --output speech.wav`;
+    "format": "mp3"
+  }' \\
+  --output speech.mp3`;
     }
 
     if (codeLang === 'python') {
-      return `import requests
-
-url = "${baseUrl}/api/v1/tts"
-headers = {
-    "Authorization": "Bearer ${key}",
-    "Content-Type": "application/json"
-}
-
-payload = {
-    "text": "Convert any script into speech with your cloned voice.",
-    "voiceId": "${voiceId}",
-    "speed": 1.0,
-    "pitch": 0,  # Semitone shift (-6 to +6)
-    "style": "Conversational"
-}
-
-response = requests.post(url, json=payload, headers=headers)
-data = response.json()
-
-print(f"Characters used: {data['charactersUsed']}")
-print(f"Remaining quota: {data['quota']['remainingCharacters']}")
-
-# Save audio WAV to disk
+      return `"""
+VoxClone Python SDK Client
+Outputs speech audio in MP3 format only.
+"""
+import requests
 import base64
-audio_bytes = base64.b64decode(data['audioBase64'])
-with open("output.wav", "wb") as f:
-    f.write(audio_bytes)
-print("Saved output.wav successfully!")`;
+
+class VoxClone:
+    def __init__(self, api_key: str, base_url: str = "${baseUrl}"):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+    def generate_speech(self, text: str, voice_id: str, pitch: int = 0, speed: float = 1.0, output_file: str = "output.mp3"):
+        """Synthesizes text and saves directly as MP3 audio."""
+        payload = {
+            "text": text,
+            "voiceId": voice_id,
+            "pitch": pitch,    # Semitone pitch shift (-6 to +6)
+            "speed": speed,
+            "format": "mp3"    # Audio format: MP3 only
+        }
+        res = requests.post(f"{self.base_url}/api/v1/tts", json=payload, headers=self.headers)
+        res.raise_for_status()
+        data = res.json()
+        
+        # Save clean MP3 audio file
+        mp3_bytes = base64.b64decode(data["audioBase64"])
+        with open(output_file, "wb") as f:
+            f.write(mp3_bytes)
+        
+        print(f"Saved {output_file}! Characters used: {data['charactersUsed']}, Remaining quota: {data['quota']['remainingCharacters']}")
+        return data
+
+# Quickstart Usage:
+client = VoxClone(api_key="${key}")
+result = client.generate_speech(
+    text="Convert any script into speech with your cloned voice.",
+    voice_id="${voiceId}",
+    pitch=0,
+    output_file="speech.mp3"
+)`;
     }
 
     if (codeLang === 'node') {
-      return `import fs from 'fs';
+      return `/**
+ * VoxClone Node.js SDK Client
+ * Outputs speech audio in MP3 format only.
+ */
+import fs from 'fs';
 
-async function generateSpeech() {
-  const response = await fetch('${baseUrl}/api/v1/tts', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ${key}',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      text: 'Convert any script into speech with your cloned voice.',
-      voiceId: '${voiceId}',
-      speed: 1.0,
-      pitch: 0, // Semitone shift (-6 to +6)
-    }),
-  });
+export class VoxClone {
+  private apiKey: string;
+  private baseUrl: string;
 
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error);
+  constructor(apiKey: string, baseUrl: string = '${baseUrl}') {
+    this.apiKey = apiKey;
+    this.baseUrl = baseUrl.replace(/\\/$/, '');
   }
 
-  // Save base64 audio to WAV file
-  const buffer = Buffer.from(result.audioBase64, 'base64');
-  fs.writeFileSync('speech.wav', buffer);
-  console.log('Saved speech.wav! Quota remaining:', result.quota.remainingCharacters);
+  async generateSpeech({
+    text,
+    voiceId,
+    pitch = 0,
+    speed = 1.0,
+    outputFile = 'speech.mp3',
+  }: {
+    text: string;
+    voiceId: string;
+    pitch?: number;
+    speed?: number;
+    outputFile?: string;
+  }) {
+    const response = await fetch(\`\${this.baseUrl}/api/v1/tts\`, {
+      method: 'POST',
+      headers: {
+        Authorization: \`Bearer \${this.apiKey}\`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text,
+        voiceId,
+        pitch,
+        speed,
+        format: 'mp3', // MP3 format only
+      }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'TTS synthesis failed');
+    }
+
+    // Save MP3 buffer to disk
+    const mp3Buffer = Buffer.from(result.audioBase64, 'base64');
+    fs.writeFileSync(outputFile, mp3Buffer);
+    console.log(\`Saved \${outputFile}! Quota remaining:\`, result.quota.remainingCharacters);
+    return result;
+  }
 }
 
-generateSpeech();`;
+// Quickstart Usage:
+const client = new VoxClone('${key}');
+await client.generateSpeech({
+  text: 'Convert any script into speech with your cloned voice.',
+  voiceId: '${voiceId}',
+  pitch: 0,
+  outputFile: 'speech.mp3',
+});`;
     }
 
     if (codeLang === 'fetch') {
-      return `// Browser / Web Client Integration
-async function playSpeech(text, voiceId, pitch = 0) {
+      return `// Browser / Web Client: Play and download audio in MP3 only
+async function playAndDownloadSpeech(text, voiceId, pitch = 0) {
   const response = await fetch('${baseUrl}/api/v1/tts', {
     method: 'POST',
     headers: {
@@ -279,15 +342,26 @@ async function playSpeech(text, voiceId, pitch = 0) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      text: text,
-      voiceId: voiceId,
-      pitch: pitch
+      text,
+      voiceId,
+      pitch,
+      format: 'mp3' // Requests MP3 audio
     })
   });
 
   const data = await response.json();
-  const audio = new Audio(\`data:audio/wav;base64,\${data.audioBase64}\`);
+  
+  // Play MP3 audio
+  const audio = new Audio(\`data:audio/mp3;base64,\${data.audioBase64}\`);
   audio.play();
+
+  // Download MP3 only
+  const a = document.createElement('a');
+  a.href = \`data:audio/mp3;base64,\${data.audioBase64}\`;
+  a.download = \`speech_\${Date.now()}.mp3\`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }`;
     }
 

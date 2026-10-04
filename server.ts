@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
+import { Mp3Encoder } from '@breezystack/lamejs';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -31,7 +32,7 @@ const ai = new GoogleGenAI({
   apiKey,
   httpOptions: {
     headers: {
-      'User-Agent': 'aistudio-build',
+      'User-Agent': 'voxclone-neural-engine',
     },
   },
 });
@@ -209,6 +210,99 @@ function generateFallbackWav(sampleRate = 24000, durationSec = 1.5, pitchHz = 22
     buffer.writeInt16LE(Math.floor(sample * 32767), 44 + i * 2);
   }
   return buffer;
+}
+
+// Convert PCM WAV buffer to MP3 buffer using Mp3Encoder
+function wavBufferToMp3(wavBuffer: Buffer): Buffer {
+  // If already MP3, return as is
+  if (
+    (wavBuffer[0] === 0x49 && wavBuffer[1] === 0x44 && wavBuffer[2] === 0x33) ||
+    (wavBuffer[0] === 0xff && (wavBuffer[1] & 0xe0) === 0xe0)
+  ) {
+    return wavBuffer;
+  }
+
+  let channels = 1;
+  let sampleRate = 24000;
+  let bitsPerSample = 16;
+  let dataOffset = 44;
+  let dataLength = Math.max(0, wavBuffer.length - 44);
+
+  try {
+    if (
+      wavBuffer.length >= 12 &&
+      wavBuffer.toString('ascii', 0, 4) === 'RIFF' &&
+      wavBuffer.toString('ascii', 8, 12) === 'WAVE'
+    ) {
+      let offset = 12;
+      while (offset < wavBuffer.length - 8) {
+        const chunkId = wavBuffer.toString('ascii', offset, offset + 4);
+        const chunkSize = wavBuffer.readUInt32LE(offset + 4);
+        if (chunkId === 'fmt ') {
+          channels = wavBuffer.readUInt16LE(offset + 10) || 1;
+          sampleRate = wavBuffer.readUInt32LE(offset + 12) || 24000;
+          bitsPerSample = wavBuffer.readUInt16LE(offset + 22) || 16;
+        } else if (chunkId === 'data') {
+          dataOffset = offset + 8;
+          dataLength = chunkSize;
+          break;
+        }
+        offset += 8 + chunkSize;
+      }
+    }
+  } catch (err) {
+    dataOffset = 44;
+    dataLength = Math.max(0, wavBuffer.length - 44);
+  }
+
+  const bytesPerSample = Math.max(1, bitsPerSample / 8);
+  const numSamples = Math.floor(dataLength / (channels * bytesPerSample));
+  if (numSamples <= 0) {
+    return Buffer.alloc(0);
+  }
+
+  // Safely extract Int16 samples into an aligned ArrayBuffer
+  const byteCount = numSamples * channels * 2;
+  const rawBytes = wavBuffer.subarray(dataOffset, dataOffset + byteCount);
+  const alignedBuffer = new ArrayBuffer(rawBytes.length);
+  new Uint8Array(alignedBuffer).set(rawBytes);
+  const samples = new Int16Array(alignedBuffer);
+
+  const encoder = new Mp3Encoder(channels, sampleRate, 128);
+  const mp3Chunks: Buffer[] = [];
+  const sampleBlockSize = 1152;
+
+  if (channels === 1) {
+    for (let i = 0; i < samples.length; i += sampleBlockSize) {
+      const chunk = samples.subarray(i, i + sampleBlockSize);
+      const mp3buf = encoder.encodeBuffer(chunk);
+      if (mp3buf.length > 0) {
+        mp3Chunks.push(Buffer.from(mp3buf));
+      }
+    }
+  } else {
+    const left = new Int16Array(numSamples);
+    const right = new Int16Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      left[i] = samples[i * 2];
+      right[i] = samples[i * 2 + 1];
+    }
+    for (let i = 0; i < numSamples; i += sampleBlockSize) {
+      const leftChunk = left.subarray(i, i + sampleBlockSize);
+      const rightChunk = right.subarray(i, i + sampleBlockSize);
+      const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk);
+      if (mp3buf.length > 0) {
+        mp3Chunks.push(Buffer.from(mp3buf));
+      }
+    }
+  }
+
+  const end = encoder.flush();
+  if (end.length > 0) {
+    mp3Chunks.push(Buffer.from(end));
+  }
+
+  return Buffer.concat(mp3Chunks);
 }
 
 // API Key verification helper
@@ -468,38 +562,49 @@ app.post('/api/v1/tts', async (req: Request, res: Response) => {
     let base64Wav = '';
 
     if (apiKey) {
-      try {
-        // Call Gemini TTS SDK
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text,
-                  speechMetadata: {
-                    style: effectiveStyle,
+      // Primary model: gemini-3.8-flash-tts (Voice Design & High throughput, separate quota)
+      // Secondary model: gemini-3.8-flash-lite-tts
+      const candidateModels = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
+
+      for (const ttsModel of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: ttsModel,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text,
+                    speechMetadata: {
+                      style: effectiveStyle,
+                    },
                   },
+                ],
+              },
+            ],
+            config: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: baseAnchor },
                 },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: baseAnchor },
               },
             },
-          },
-        });
+          });
 
-        // Unary default: a complete WAV file (audio/wav, 24kHz mono 16-bit)
-        base64Wav = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || '';
-      } catch (geminiError: any) {
-        console.error('Gemini TTS Error:', geminiError?.message || geminiError);
-        // If Gemini model returns an error, produce high fidelity harmonic voice buffer with pitch shift
+          const wavData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || '';
+          if (wavData) {
+            base64Wav = wavData;
+            break;
+          }
+        } catch (geminiError: any) {
+          console.warn(`[VoxClone] Notice for ${ttsModel}:`, geminiError?.message || 'Quota or model unavailable, trying alternative');
+        }
+      }
+
+      // If both cloud models are temporarily unavailable/rate-limited, generate resonant audio
+      if (!base64Wav) {
         const basePitchHz = baseAnchor === 'Charon' ? 120 : baseAnchor === 'Puck' ? 160 : 220;
         const adjustedPitchHz = basePitchHz * Math.pow(2, pitchNumber / 12);
         const fallbackBuffer = generateFallbackWav(
@@ -532,21 +637,65 @@ app.post('/api/v1/tts', async (req: Request, res: Response) => {
 
     const newRemaining = Math.max(0, DAILY_LIMIT - usageRecord.charactersUsed);
 
-    // If client requested direct WAV binary streaming
-    if (format === 'wav' || req.headers.accept === 'audio/wav') {
-      const audioBuffer = Buffer.from(base64Wav, 'base64');
-      res.setHeader('Content-Type', 'audio/wav');
-      res.setHeader('Content-Length', audioBuffer.length);
+    // Convert synthesized audio to high-fidelity MP3
+    const wavBuffer = Buffer.from(base64Wav, 'base64');
+    let mp3Buffer: Buffer;
+    try {
+      mp3Buffer = wavBufferToMp3(wavBuffer);
+    } catch (mp3Err) {
+      console.warn('MP3 conversion fallback:', mp3Err);
+      mp3Buffer = wavBuffer;
+    }
+    const base64Mp3 = mp3Buffer.toString('base64');
+
+    // Only return direct binary audio streaming if explicitly requested via query param, binary format, or explicit audio-only Accept header
+    const wantsBinaryStream =
+      req.query.download === 'mp3' ||
+      req.query.download === 'true' ||
+      req.query.stream === 'true' ||
+      format === 'binary' ||
+      format === 'stream' ||
+      format === 'raw' ||
+      (typeof req.headers.accept === 'string' &&
+        (req.headers.accept === 'audio/mpeg' || req.headers.accept === 'audio/mp3') &&
+        !req.headers.accept.includes('application/json') &&
+        !req.headers.accept.includes('*/*'));
+
+    const wantsWavBinaryStream =
+      format === 'wav-binary' ||
+      (typeof req.headers.accept === 'string' &&
+        req.headers.accept === 'audio/wav' &&
+        !req.headers.accept.includes('application/json') &&
+        !req.headers.accept.includes('*/*'));
+
+    if (wantsBinaryStream) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', mp3Buffer.length);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="voxclone_speech_${Date.now()}.mp3"`
+      );
       res.setHeader('X-Characters-Used', charCount.toString());
       res.setHeader('X-Daily-Remaining', newRemaining.toString());
-      return res.end(audioBuffer);
+      return res.end(mp3Buffer);
     }
 
-    // Standard JSON response
+    if (wantsWavBinaryStream) {
+      res.setHeader('Content-Type', 'audio/wav');
+      res.setHeader('Content-Length', wavBuffer.length);
+      res.setHeader('X-Characters-Used', charCount.toString());
+      res.setHeader('X-Daily-Remaining', newRemaining.toString());
+      return res.end(wavBuffer);
+    }
+
+    // Standard JSON response with MP3 as the primary audio payload
     res.json({
       success: true,
-      audioBase64: base64Wav,
-      mimeType: 'audio/wav',
+      audioBase64: base64Mp3,
+      audioMp3Base64: base64Mp3,
+      audioWavBase64: base64Wav,
+      mimeType: 'audio/mp3',
+      format: 'mp3',
       voice: {
         id: selectedVoice.id,
         name: selectedVoice.name,
@@ -565,6 +714,28 @@ app.post('/api/v1/tts', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('TTS error:', error);
     res.status(500).json({ error: error?.message || 'Failed to synthesize speech' });
+  }
+});
+
+// Endpoint: Convert audio WAV to MP3
+app.post('/api/v1/convert-to-mp3', (req: Request, res: Response) => {
+  try {
+    const { audioBase64 } = req.body;
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Missing audioBase64 in request body' });
+    }
+    const cleanBase64 = audioBase64.replace(/^data:audio\/[^;]+;base64,/, '');
+    const wavBuffer = Buffer.from(cleanBase64, 'base64');
+    const mp3Buffer = wavBufferToMp3(wavBuffer);
+    res.json({
+      success: true,
+      audioMp3Base64: mp3Buffer.toString('base64'),
+      mimeType: 'audio/mp3',
+      format: 'mp3',
+      byteSize: mp3Buffer.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to convert audio to MP3' });
   }
 });
 

@@ -37,6 +37,8 @@ export interface GeneratedAudioItem {
   style?: string;
   speed?: number;
   pitch?: number;
+  format?: string;
+  mimeType?: string;
 }
 
 export interface ApiKeyItem {

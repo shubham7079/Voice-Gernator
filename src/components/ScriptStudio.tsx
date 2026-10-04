@@ -98,18 +98,50 @@ export const ScriptStudio: React.FC<ScriptStudioProps> = ({
     try {
       const res = await fetch('/api/v1/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({
           text: scriptText,
           voiceId: selectedVoice?.id,
           style: styleEmotion,
           speed,
           pitch,
-          format: 'base64',
+          format: 'mp3',
         }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      let data: any;
+
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else if (contentType.includes('audio/')) {
+        // If server sent raw audio binary stream directly
+        const blob = await res.blob();
+        const base64Audio = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+        data = {
+          success: true,
+          audioBase64: base64Audio,
+          charactersUsed: scriptText.length,
+          quota: {
+            charactersUsedToday: quota.charactersUsed + scriptText.length,
+            remainingCharacters: Math.max(0, quota.remainingCharacters - scriptText.length),
+            percentUsed: Number(
+              (((quota.charactersUsed + scriptText.length) / quota.dailyLimit) * 100).toFixed(1)
+            ),
+          },
+        };
+      } else {
+        const textResp = await res.text();
+        throw new Error(textResp || `Server error (status ${res.status})`);
+      }
+
       if (!res.ok) {
         throw new Error(data.error || data.message || 'Failed to synthesize speech');
       }
@@ -126,6 +158,8 @@ export const ScriptStudio: React.FC<ScriptStudioProps> = ({
         style: styleEmotion,
         speed,
         pitch,
+        format: 'mp3',
+        mimeType: 'audio/mp3',
       };
 
       setCurrentAudio(newItem);
