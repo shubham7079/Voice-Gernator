@@ -10,12 +10,25 @@ import { ScriptStudio } from './components/ScriptStudio';
 import { QuotaDashboard } from './components/QuotaDashboard';
 import { ApiDeveloperHub } from './components/ApiDeveloperHub';
 import { AudioHistory } from './components/AudioHistory';
+import { GoogleSheetsIntegrationModal } from './components/GoogleSheetsIntegrationModal';
 import { VoiceProfile, QuotaData, GeneratedAudioItem } from './types';
 import { Sparkles, Terminal, Mic, FileText, CheckCircle2 } from 'lucide-react';
 import { useTheme } from './ThemeContext';
+import { useAuth } from './AuthContext';
+import {
+  saveUserVoice,
+  deleteUserVoice,
+  subscribeUserVoices,
+  saveUserAudioItem,
+  clearUserAudioHistory,
+  subscribeUserAudioHistory,
+  saveUserQuota,
+  subscribeUserQuota,
+} from './lib/firestoreService';
 
 export default function App() {
   const { isDark } = useTheme();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('tts');
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>('');
@@ -30,6 +43,8 @@ export default function App() {
   });
   const [historyItems, setHistoryItems] = useState<GeneratedAudioItem[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+  const [activeScriptText, setActiveScriptText] = useState<string | undefined>(undefined);
 
   // Load voices and quota on initial mount
   useEffect(() => {
@@ -46,6 +61,48 @@ export default function App() {
       console.error('Error loading history:', e);
     }
   }, []);
+
+  // Sync with Firestore when user is authenticated
+  useEffect(() => {
+    if (!user) return;
+
+    // 1. Sync custom voices from Firestore
+    const unsubVoices = subscribeUserVoices(user.uid, (firestoreVoices) => {
+      if (firestoreVoices.length > 0) {
+        setVoices((prev) => {
+          const presets = prev.filter((v) => v.type === 'preset');
+          const clonedIds = new Set(firestoreVoices.map((v) => v.id));
+          const existingNonFirestore = prev.filter(
+            (v) => v.type === 'cloned' && !clonedIds.has(v.id)
+          );
+          return [...firestoreVoices, ...existingNonFirestore, ...presets];
+        });
+      }
+    });
+
+    // 2. Sync audio history from Firestore
+    const unsubHistory = subscribeUserAudioHistory(user.uid, (firestoreHistory) => {
+      if (firestoreHistory.length > 0) {
+        setHistoryItems(firestoreHistory);
+        try {
+          localStorage.setItem('voxclone_history', JSON.stringify(firestoreHistory.slice(0, 30)));
+        } catch (_) {}
+      }
+    });
+
+    // 3. Sync quota from Firestore
+    const unsubQuota = subscribeUserQuota(user.uid, (firestoreQuota) => {
+      if (firestoreQuota) {
+        setQuota(firestoreQuota);
+      }
+    });
+
+    return () => {
+      unsubVoices();
+      unsubHistory();
+      unsubQuota();
+    };
+  }, [user]);
 
   // Save history to localStorage
   const saveHistory = (items: GeneratedAudioItem[]) => {
@@ -96,6 +153,15 @@ export default function App() {
       if (data.success) {
         fetchQuota();
         showToast('Daily quota reset back to 10,000 characters!');
+        if (user) {
+          saveUserQuota(user.uid, {
+            ...quota,
+            charactersUsed: 0,
+            remainingCharacters: quota.dailyLimit,
+            percentUsed: 0,
+            requestsToday: 0,
+          }).catch(console.warn);
+        }
       }
     } catch (e) {
       console.error('Error resetting quota:', e);
@@ -106,6 +172,12 @@ export default function App() {
     setVoices((prev) => [newVoice, ...prev]);
     setSelectedVoiceId(newVoice.id);
     showToast(`Voice "${newVoice.name}" cloned successfully! You can now use it in Script Studio.`);
+
+    if (user) {
+      saveUserVoice(user.uid, newVoice).catch((err) => {
+        console.warn('Failed to persist cloned voice to Firestore:', err);
+      });
+    }
   };
 
   const handleVoiceDeleted = async (id: string) => {
@@ -120,6 +192,12 @@ export default function App() {
           }
         }
         showToast('Voice deleted successfully');
+
+        if (user) {
+          deleteUserVoice(user.uid, id).catch((err) => {
+            console.warn('Failed to delete voice from Firestore:', err);
+          });
+        }
       }
     } catch (e) {
       console.error('Error deleting voice:', e);
@@ -128,8 +206,32 @@ export default function App() {
 
   const handleAudioGenerated = (item: GeneratedAudioItem, updatedQuota: QuotaData) => {
     setQuota(updatedQuota);
-    saveHistory([item, ...historyItems]);
+    const updatedHistory = [item, ...historyItems];
+    saveHistory(updatedHistory);
     showToast(`Synthesized ${item.charactersUsed} characters with "${item.voiceName}".`);
+
+    if (user) {
+      saveUserAudioItem(user.uid, item).catch((err) => {
+        console.warn('Failed to persist audio to Firestore:', err);
+      });
+      saveUserQuota(user.uid, updatedQuota).catch((err) => {
+        console.warn('Failed to persist quota to Firestore:', err);
+      });
+    }
+  };
+
+  const handleClearHistory = () => {
+    setHistoryItems([]);
+    try {
+      localStorage.removeItem('voxclone_history');
+    } catch (_) {}
+    showToast('Library cleared');
+
+    if (user) {
+      clearUserAudioHistory(user.uid).catch((err) => {
+        console.warn('Failed to clear audio history in Firestore:', err);
+      });
+    }
   };
 
   return (
@@ -144,6 +246,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         quota={quota}
         historyCount={historyItems.length}
+        onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
       />
 
       {/* Floating Toast Notification */}
@@ -168,6 +271,8 @@ export default function App() {
             quota={quota}
             onAudioGenerated={handleAudioGenerated}
             onOpenCloner={() => setActiveTab('clone')}
+            onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
+            initialScriptText={activeScriptText}
           />
         )}
 
@@ -197,7 +302,8 @@ export default function App() {
         {activeTab === 'history' && (
           <AudioHistory
             items={historyItems}
-            onClearHistory={() => saveHistory([])}
+            onClearHistory={handleClearHistory}
+            onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
             onUseScript={(text, voiceId) => {
               if (voiceId) setSelectedVoiceId(voiceId);
               setActiveTab('tts');
@@ -205,6 +311,27 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Google Sheets Workspace Integration Modal */}
+      <GoogleSheetsIntegrationModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+        audioItems={historyItems}
+        voices={voices}
+        onSelectScriptToSynthesize={(text, voiceName) => {
+          setActiveScriptText(text);
+          if (voiceName) {
+            const matchedVoice = voices.find(
+              (v) => v.name.toLowerCase() === voiceName.toLowerCase()
+            );
+            if (matchedVoice) {
+              setSelectedVoiceId(matchedVoice.id);
+            }
+          }
+          setActiveTab('tts');
+          showToast('Loaded script from Google Sheets into Script Studio!');
+        }}
+      />
 
       {/* Footer */}
       <footer

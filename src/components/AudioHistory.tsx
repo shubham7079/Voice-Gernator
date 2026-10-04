@@ -1,5 +1,5 @@
 import React from 'react';
-import { History, Trash2, Copy, Check, Music } from 'lucide-react';
+import { History, Trash2, Copy, Check, Music, FileSpreadsheet } from 'lucide-react';
 import { GeneratedAudioItem } from '../types';
 import { AudioWaveform } from './AudioWaveform';
 import { useTheme } from '../ThemeContext';
@@ -8,12 +8,14 @@ interface AudioHistoryProps {
   items: GeneratedAudioItem[];
   onClearHistory: () => void;
   onUseScript: (text: string, voiceId: string) => void;
+  onOpenSheetsModal?: () => void;
 }
 
 export const AudioHistory: React.FC<AudioHistoryProps> = ({
   items,
   onClearHistory,
   onUseScript,
+  onOpenSheetsModal,
 }) => {
   const { isDark } = useTheme();
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
@@ -26,7 +28,7 @@ export const AudioHistory: React.FC<AudioHistoryProps> = ({
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2
             className={`text-2xl font-bold tracking-tight flex items-center gap-2 ${
@@ -41,19 +43,35 @@ export const AudioHistory: React.FC<AudioHistoryProps> = ({
           </p>
         </div>
 
-        {items.length > 0 && (
-          <button
-            onClick={onClearHistory}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
-              isDark
-                ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 border-neutral-800'
-                : 'bg-white hover:bg-slate-100 text-slate-600 hover:text-red-600 border-slate-200'
-            }`}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Library</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onOpenSheetsModal && (
+            <button
+              onClick={onOpenSheetsModal}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition shadow-xs ${
+                isDark
+                  ? 'bg-emerald-950/40 hover:bg-emerald-950/70 border-emerald-800/50 text-emerald-400'
+                  : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-800'
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Export to Sheets</span>
+            </button>
+          )}
+
+          {items.length > 0 && (
+            <button
+              onClick={onClearHistory}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                isDark
+                  ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 border-neutral-800'
+                  : 'bg-white hover:bg-slate-100 text-slate-600 hover:text-red-600 border-slate-200'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Library</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {items.length === 0 ? (

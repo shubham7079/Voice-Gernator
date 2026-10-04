@@ -13,6 +13,7 @@ import {
   Plus,
   Sliders,
   RotateCcw,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { VoiceProfile, QuotaData, GeneratedAudioItem } from '../types';
 import { AudioWaveform } from './AudioWaveform';
@@ -25,6 +26,8 @@ interface ScriptStudioProps {
   quota: QuotaData;
   onAudioGenerated: (item: GeneratedAudioItem, updatedQuota: QuotaData) => void;
   onOpenCloner?: () => void;
+  onOpenSheetsModal?: () => void;
+  initialScriptText?: string;
 }
 
 export const ScriptStudio: React.FC<ScriptStudioProps> = ({
@@ -34,11 +37,20 @@ export const ScriptStudio: React.FC<ScriptStudioProps> = ({
   quota,
   onAudioGenerated,
   onOpenCloner,
+  onOpenSheetsModal,
+  initialScriptText,
 }) => {
   const { isDark } = useTheme();
   const [scriptText, setScriptText] = useState(
-    "Hello! Welcome to VoxClone. This voice was synthesized directly from acoustic cloning parameters and neural text-to-speech. You can type any script up to your 10,000 daily character quota!"
+    initialScriptText ||
+      "Hello! Welcome to VoxClone. This voice was synthesized directly from acoustic cloning parameters and neural text-to-speech. You can type any script up to your 10,000 daily character quota!"
   );
+
+  React.useEffect(() => {
+    if (initialScriptText) {
+      setScriptText(initialScriptText);
+    }
+  }, [initialScriptText]);
   const [styleEmotion, setStyleEmotion] = useState('Conversational & Engaging');
   const [speed, setSpeed] = useState(1.0);
   const [pitch, setPitch] = useState(0); // semitone shift: -6 to +6
@@ -312,6 +324,21 @@ export const ScriptStudio: React.FC<ScriptStudioProps> = ({
 
             {/* Template Inspiration Bar */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              {onOpenSheetsModal && (
+                <button
+                  type="button"
+                  onClick={onOpenSheetsModal}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 border rounded-lg whitespace-nowrap transition active:scale-95 font-semibold ${
+                    isDark
+                      ? 'bg-emerald-950/40 hover:bg-emerald-950/70 border-emerald-800/60 text-emerald-400'
+                      : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-800'
+                  }`}
+                  title="Import voiceover scripts from your Google Spreadsheets"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Import from Sheets</span>
+                </button>
+              )}
               <span className={`font-medium whitespace-nowrap mr-1 ${isDark ? 'text-neutral-500' : 'text-slate-400'}`}>
                 Templates:
               </span>

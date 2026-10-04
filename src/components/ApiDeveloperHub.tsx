@@ -17,6 +17,12 @@ import {
 import { ApiKeyItem, VoiceProfile } from '../types';
 import { AudioWaveform } from './AudioWaveform';
 import { useTheme } from '../ThemeContext';
+import { useAuth } from '../AuthContext';
+import {
+  saveUserApiKey,
+  deleteUserApiKey,
+  subscribeUserApiKeys,
+} from '../lib/firestoreService';
 
 interface ApiDeveloperHubProps {
   voices: VoiceProfile[];
@@ -24,6 +30,7 @@ interface ApiDeveloperHubProps {
 
 export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
   const { isDark } = useTheme();
+  const { user } = useAuth();
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
   const [newKeyName, setNewKeyName] = useState('');
@@ -54,6 +61,24 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
     fetchKeys();
   }, []);
 
+  // Sync API keys with Firestore when user is authenticated
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeUserApiKeys(user.uid, (firestoreKeys) => {
+      if (firestoreKeys.length > 0) {
+        setKeys((prev) => {
+          const ids = new Set(firestoreKeys.map((k) => k.id));
+          const filtered = prev.filter((k) => !ids.has(k.id));
+          return [...firestoreKeys, ...filtered];
+        });
+        if (!activeKey) {
+          setActiveKey(firestoreKeys[0].fullKey);
+        }
+      }
+    });
+    return () => unsub();
+  }, [user, activeKey]);
+
   const fetchKeys = async () => {
     try {
       const res = await fetch('/api/v1/keys');
@@ -79,6 +104,12 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
       if (data.key) {
         setNewKeyName('');
         fetchKeys();
+        if (user) {
+          saveUserApiKey(user.uid, {
+            ...data.key,
+            userId: user.uid,
+          }).catch(console.warn);
+        }
       }
     } catch (e) {
       console.error('Error creating key:', e);
@@ -89,6 +120,9 @@ export const ApiDeveloperHub: React.FC<ApiDeveloperHubProps> = ({ voices }) => {
     try {
       await fetch(`/api/v1/keys/${id}`, { method: 'DELETE' });
       fetchKeys();
+      if (user) {
+        deleteUserApiKey(user.uid, id).catch(console.warn);
+      }
     } catch (e) {
       console.error('Error deleting key:', e);
     }

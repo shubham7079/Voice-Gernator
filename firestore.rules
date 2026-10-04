@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Connection testing doc
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // User profile and subcollections
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // Custom cloned voices
+      match /voices/{voiceId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Synthesized audio history
+      match /audioHistory/{audioId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Daily quota consumption
+      match /quota/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Developer API keys
+      match /apiKeys/{keyId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}

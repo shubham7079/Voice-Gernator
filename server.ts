@@ -26,6 +26,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Serve static assets from public folder (favicon, logos)
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/favicon.ico', (req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
+});
+
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY || '';
 const ai = new GoogleGenAI({

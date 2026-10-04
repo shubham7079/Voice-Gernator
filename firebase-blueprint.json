@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "VoiceProfile": {
+      "title": "VoiceProfile",
+      "description": "Cloned or customized neural voice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["preset", "cloned"] },
+        "description": { "type": "string" },
+        "baseVoiceAnchor": { "type": "string" },
+        "stylePrompt": { "type": "string" },
+        "gender": { "type": "string" },
+        "pitch": { "type": "string" },
+        "tempo": { "type": "string" },
+        "accent": { "type": "string" },
+        "timbre": { "type": "string" },
+        "sampleAudio": { "type": "string" },
+        "sampleText": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "type", "createdAt"]
+    },
+    "GeneratedAudio": {
+      "title": "GeneratedAudio",
+      "description": "Synthesized speech record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "voiceName": { "type": "string" },
+        "voiceId": { "type": "string" },
+        "voiceType": { "type": "string" },
+        "audioBase64": { "type": "string" },
+        "charactersUsed": { "type": "number" },
+        "speed": { "type": "number" },
+        "pitch": { "type": "number" },
+        "format": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "text", "voiceName", "audioBase64", "charactersUsed", "timestamp"]
+    },
+    "UserQuota": {
+      "title": "UserQuota",
+      "description": "Daily character quota and consumption record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "charactersUsed": { "type": "number" },
+        "dailyLimit": { "type": "number" },
+        "date": { "type": "string" },
+        "requestsToday": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "charactersUsed", "dailyLimit", "date"]
+    },
+    "ApiKey": {
+      "title": "ApiKey",
+      "description": "Developer REST API key",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "key": { "type": "string" },
+        "maskedKey": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastUsedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "key", "userId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile information"
+    },
+    "/users/{userId}/voices/{voiceId}": {
+      "schema": "VoiceProfile",
+      "description": "User custom cloned voice profiles"
+    },
+    "/users/{userId}/audioHistory/{audioId}": {
+      "schema": "GeneratedAudio",
+      "description": "User synthesized audio library"
+    },
+    "/users/{userId}/quota/daily": {
+      "schema": "UserQuota",
+      "description": "User daily character usage tracking"
+    },
+    "/users/{userId}/apiKeys/{keyId}": {
+      "schema": "ApiKey",
+      "description": "User developer API keys"
+    }
+  }
+}
